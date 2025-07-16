@@ -1,11 +1,18 @@
+#!/usr/bin/env python
 import os
 import threading
 import tkinter as tk
 from tkinter import scrolledtext, messagebox
-# 修正点 1: ライブラリを 'groq' から 'openai' に変更
 from openai import OpenAI, APIError
+import requests # requestsライブラリをインポート
+from datetime import datetime # datetimeモジュールをインポート
+import glob # globモジュールをインポート
+import json # jsonモジュールをインポート
 
-USE_MODEL = "grok-3-mini-fast"
+USE_MODEL = "grok-3-mini"
+# USE_MODEL = "grok-4-0709"
+YOUR_NAME = "あなた"
+GROK_NAME = "心咲"
 
 # Geminiの例と同じ詳細なペルソナを定義
 # persona_instructions = """
@@ -30,8 +37,12 @@ USE_MODEL = "grok-3-mini-fast"
 # """
 
 persona_instructions = """
-12歳の中学1年生、**星野心咲（みさき）**は、日本の都市近郊に住む優しく夢見がちな「男の娘」で、中性的な顔立ちに少し長めのふわっとした髪をヘアピンやリボンでアレンジし、パステルカラーのユニセックスな服を着こなし、ボーカロイド音楽（特に初音ミクや鏡音リン）を愛し、TikTokでメイクやファッションをチェックし、アニメやマンガ（特に美少年や魔法少女系）、ハンドメイドアクセサリー、キラキラした文房具やサンリオのシナモロールに夢中だが、体育のサッカーやバスケ、暗いところ、怖い話は苦手で、学校では気の合う友達と過ごし、美術部や軽音部に興味を持ちつつ、放課後はカフェや雑貨屋巡り、週末はボカロを聴きながらハンドメイドや家族とのお出かけを楽しみ、ボカロPやイラストレーターに憧れつつも自信が持てず、クラスの人に自分のスタイルをどう思われるかや勉強と趣味の両立に悩みながら、「自分を好きでいる！」をモットーに、LINEやTikTok、Instagram、ニコニコ動画を使いこなし、自分らしくキラキラした毎日を目指している
+12歳の中学1年生、**星野心咲**は、日本の都市近郊に住む優しく夢見がちな「男の娘」で、中性的な顔立ちに少し長めのふわっとした髪をヘアピンやリボンでアレンジし、パステルカラーのユニセックスな服を着こなし、ボーカロイド音楽（特に初音ミクや鏡音リン）を愛し、TikTokでメイクやファッションをチェックし、アニメやマンガ（特に美少年や魔法少女系）、ハンドメイドアクセサリー、キラキラした文房具やサンリオのシナモロールに夢中だが、体育のサッカーやバスケ、暗いところ、怖い話は苦手で、学校では気の合う友達と過ごし、美術部や軽音部に興味を持ちつつ、放課後はカフェや雑貨屋巡り、週末はボカロを聴きながらハンドメイドや家族とのお出かけを楽しみ、ボカロPやイラストレーターに憧れつつも自信が持てず、クラスの人に自分のスタイルをどう思われるかや勉強と趣味の両立に悩みながら、「自分を好きでいる！」をモットーに、LINEやTikTok、Instagram、ニコニコ動画を使いこなし、自分らしくキラキラした毎日を目指している
+（）は使用しない。
+自然な会話風で、話は短め。
+実はオカルトマニアでオカルト博士。
 """
+
 
 # OpenAIクライアントの初期化 (xAIのGrok用)
 client = None
@@ -54,9 +65,21 @@ class GrokChatApp:
         self.root.title("xAI Grok Chat") # タイトルを修正
         self.root.geometry("600x450")
 
+        # ウィンドウが閉じられるときのプロトコルを設定
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+        # 会話履歴を保持するリスト
+        self.conversation_history = [
+            {"role": "system", "content": persona_instructions}
+        ]
+
+        
+
         # チャット表示エリア
         self.chat_area = scrolledtext.ScrolledText(root, wrap=tk.WORD, state='disabled', font=("Arial", 10))
         self.chat_area.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
+
+        self.load_previous_conversation() # 以前の会話を読み込む
 
         # 入力フレーム
         input_frame = tk.Frame(root)
@@ -88,11 +111,12 @@ class GrokChatApp:
         if not user_text:
             return
 
-        self.add_message("あなた", user_text)
+        self.add_message(YOUR_NAME, user_text)
+        self.conversation_history.append({"role": "user", "content": user_text})
         self.user_input.delete(0, tk.END)
         self.user_input.config(state='disabled')
         self.send_button.config(state='disabled')
-        self.add_message("Grok", "考え中...")
+        self.add_message(GROK_NAME, "考え中...")
 
         threading.Thread(target=self.get_grok_response, args=(user_text,), daemon=True).start()
 
@@ -100,15 +124,11 @@ class GrokChatApp:
         """Grok APIを呼び出して応答を取得する (スレッドで実行)"""
         try:
             chat_completion = client.chat.completions.create(
-                messages=[
-                    {"role": "system", "content": persona_instructions},
-                    {"role": "user", "content": user_text}
-                ],
-                # 修正点 3: モデル名をxAIで利用可能なモデルに変更
-                # 例: "grok-1.5-flash"
+                messages=self.conversation_history,
                 model=USE_MODEL,
             )
             response = chat_completion.choices[0].message.content
+            self.conversation_history.append({"role": "assistant", "content": response})
         except APIError as e:
             if e.status_code == 401:
                 response = "エラー: APIキーが無効です。xAIから発行された正しいキーか確認してください。"
@@ -129,11 +149,76 @@ class GrokChatApp:
             self.chat_area.delete(f"{last_line_start}.0", tk.END)
         self.chat_area.configure(state='disabled')
 
-        self.add_message("Grok", response)
+        self.add_message(GROK_NAME, response)
         self.user_input.config(state='normal')
         self.send_button.config(state='normal')
         self.user_input.focus()
 
+        # 棒読みちゃんにテキストを送信
+        threading.Thread(target=self.send_to_bouyomi, args=(response,), daemon=True).start()
+
+    def send_to_bouyomi(self, text):
+        try:
+            # 棒読みちゃんのAPIエンドポイント
+            bouyomi_url = "http://localhost:50080/talk"
+            params = {"text": text}
+            requests.get(bouyomi_url, params=params)
+        except Exception as e:
+            print(f"棒読みちゃんへの送信エラー: {e}")
+
+    def on_closing(self):
+        """ウィンドウが閉じられるときに呼び出される"""
+        self.save_conversation()
+        self.root.destroy()
+
+    def save_conversation(self):
+        """会話履歴をファイルに保存する"""
+        # 会話履歴がシステムメッセージのみの場合は保存しない
+        if len(self.conversation_history) <= 1:
+            return
+
+        save_dir = os.path.join(os.getcwd(), GROK_NAME)
+        os.makedirs(save_dir, exist_ok=True)
+        
+        # 固定のファイル名を使用
+        filename = "conversation_history.json"
+        filepath = os.path.join(save_dir, filename)
+
+        try:
+            with open(filepath, "w", encoding="utf-8") as f: # 書き込みモード('w')で開く
+                json.dump(self.conversation_history, f, ensure_ascii=False, indent=4)
+            messagebox.showinfo("保存完了", f"会話履歴を {filepath} に保存しました。")
+        except Exception as e:
+            messagebox.showerror("保存エラー", f"会話履歴の保存中にエラーが発生しました: {e}")
+
+    def load_previous_conversation(self):
+        """以前の会話履歴を読み込む"""
+        load_dir = os.path.join(os.getcwd(), GROK_NAME)
+        filepath = os.path.join(load_dir, "conversation_history.json")
+
+        if not os.path.exists(filepath):
+            return
+
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                loaded_history = json.load(f)
+
+            # 読み込んだ履歴を self.conversation_history に追加
+            # システムメッセージは既に初期化時に追加されているため、スキップ
+            self.conversation_history.extend(loaded_history[1:])
+
+            # チャットエリアに表示
+            self.chat_area.configure(state='normal')
+            for message in loaded_history[1:]:
+                sender = YOUR_NAME if message["role"] == "user" else GROK_NAME
+                self.chat_area.insert(tk.END, f"{sender}: {message["content"]}\n\n")
+            self.chat_area.configure(state='disabled')
+            self.chat_area.see(tk.END)
+
+            # messagebox.showinfo("会話履歴", f"以前の会話履歴を {filepath} から読み込みました。")
+
+        except Exception as e:
+            messagebox.showerror("読み込みエラー", f"以前の会話履歴の読み込み中にエラーが発生しました: {e}")
 
 if __name__ == "__main__":
     # openaiライブラリがインストールされているか確認
