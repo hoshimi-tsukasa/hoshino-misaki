@@ -5,7 +5,7 @@ import tkinter as tk
 from tkinter import scrolledtext, messagebox
 from xai_sdk import Client
 from xai_sdk.chat import user, system, assistant
-from xai_sdk.errors import XAIError
+from xai_sdk.search import SearchParameters
 import requests # requestsライブラリをインポート
 from datetime import datetime # datetimeモジュールをインポート
 import glob # globモジュールをインポート
@@ -15,27 +15,9 @@ import subprocess # subprocessモジュールを追加
 USE_BOUYOMI = False # 棒読みちゃんを使用するかどうかのフラグ
 # 棒読みちゃんの実行ファイルへのパス（ご自身の環境に合わせて変更してください）
 BOUYOMI_PATH = r"C:\Users\shoji\Downloads\BouyomiChan_0_1_11_0_Beta21\BouyomiChan.exe"
-USE_MODEL = "grok-3-mini"
-# USE_MODEL = "grok-4-0709"
+
 YOUR_NAME = "あなた"
 GROK_NAME = "GROK"
-
-persona_instructions = ""
-
-# xAI SDKクライアントの初期化
-client = None
-try:
-    # 重要: 下の行にあなたのGrok APIキーを直接入力してください。
-    api_key = "xai-sBzV9tPcAeK1ezz7luR9bFoEsB3HZPJqTfE5A3bkrbza4uCrcO8ijhjqmowleToSBLWkPnSnlKazT0rm" 
-
-    if not api_key or api_key == "ここにあなたのAPIキーを入力してください":
-        client = None
-    else:
-        # 修正点: xAI SDKクライアントを初期化
-        client = Client(api_key=api_key)
-except Exception as e:
-    messagebox.showerror("初期化エラー", f"クライアントの初期化に失敗しました: {e}")
-client = None
 
 class GrokChatApp:
     def __init__(self, root):
@@ -47,9 +29,22 @@ class GrokChatApp:
         if USE_BOUYOMI:
             self.start_bouyomi()
 
-        self.conversation_history = [
-            {"role": "system", "content": persona_instructions}
-        ]
+        self.USE_MODEL = "grok-4"
+        self.client = None
+        self.chat = None # chatオブジェクトも初期化
+
+        try:
+            api_key = "xai-sBzV9tPcAeK1ezz7luR9bFoEsB3HZPJqTfE5A3bkrbza4uCrcO8ijhjqmowleToSBLWkPnSnlKazT0rm" 
+            if not api_key or api_key == "ここにあなたのAPIキーを入力してください":
+                messagebox.showerror("APIキーエラー", "APIキーが設定されていません。")
+            else:
+                self.client = Client(api_key=api_key)
+                self.chat = self.client.chat.create(model=self.USE_MODEL, temperature=0, search_parameters=SearchParameters(mode="auto"),)
+                self.chat.append(system(""))
+        except Exception as e:
+            messagebox.showerror("初期化エラー", f"クライアントの初期化に失敗しました: {e}")
+
+        self.conversation_history = []
 
         self.chat_area = scrolledtext.ScrolledText(root, wrap=tk.WORD, state='disabled', font=("Arial", 10))
         self.chat_area.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
@@ -82,7 +77,7 @@ class GrokChatApp:
         self.chat_area.see(tk.END)
 
     def send_message(self, event=None):
-        if not client:
+        if not self.client or not self.chat: # self.chatもチェック
             messagebox.showerror("APIキーエラー", "クライアントが初期化されていません。APIキーを確認してください。")
             return
 
@@ -102,22 +97,10 @@ class GrokChatApp:
     def get_grok_response(self):
         """Grok APIを呼び出して応答を取得する (スレッドで実行)"""
         try:
-            messages_for_api = []
-            for msg in self.conversation_history:
-                if msg['role'] == 'system':
-                    messages_for_api.append(system(msg['content']))
-                elif msg['role'] == 'user':
-                    messages_for_api.append(user(msg['content']))
-                elif msg['role'] == 'assistant':
-                    messages_for_api.append(assistant(msg['content']))
-            
-            chat_completion = client.chat.completions.create(
-                messages=messages_for_api,
-                model=USE_MODEL,
-            )
-            response = chat_completion.choices[0].message.content
+            self.chat.append(user(self.conversation_history[-1]['content']))
+            response = self.chat.sample().content
             self.conversation_history.append({"role": "assistant", "content": response})
-        except XAIError as e:
+        except Exception as e:
             response = f"APIエラーが発生しました: {e}"
         except Exception as e:
             response = f"予期せぬエラーが発生しました: {e}"
@@ -155,7 +138,7 @@ class GrokChatApp:
         self.root.destroy()
 
     def save_conversation(self):
-        if len(self.conversation_history) <= 1:
+        if not self.conversation_history:
             return
         save_dir = os.path.join(os.getcwd(), GROK_NAME)
         os.makedirs(save_dir, exist_ok=True)
@@ -175,10 +158,17 @@ class GrokChatApp:
         try:
             with open(filepath, "r", encoding="utf-8") as f:
                 loaded_history = json.load(f)
-            self.conversation_history.extend(loaded_history[1:])
-            self.chat_area.configure(state='normal')
-            for message in loaded_history[1:]:
-                sender = YOUR_NAME if message["role"] == "user" else GROK_NAME
+            for message in loaded_history:
+                if message["role"] == "system":
+                    # システムメッセージは初期化時に設定済みのためスキップ
+                    continue
+                elif message["role"] == "user":
+                    self.chat.append(user(message['content']))
+                    sender = YOUR_NAME
+                elif message["role"] == "assistant":
+                    self.chat.append(assistant(message['content']))
+                    sender = GROK_NAME
+                self.conversation_history.append(message)
                 self.chat_area.insert(tk.END, f"{sender}: {message['content']}\n\n")
             self.chat_area.configure(state='disabled')
             self.chat_area.see(tk.END)
