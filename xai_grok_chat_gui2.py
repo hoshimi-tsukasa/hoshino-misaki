@@ -34,7 +34,7 @@ class GrokChatApp:
         self.chat = None # chatオブジェクトも初期化
 
         try:
-            api_key = "xai-sBzV9tPcAeK1ezz7luR9bFoEsB3HZPJqTfE5A3bkrbza4uCrcO8ijhjqmowleToSBLWkPnSnlKazT0rm" 
+            api_key = "" 
             if not api_key or api_key == "ここにあなたのAPIキーを入力してください":
                 messagebox.showerror("APIキーエラー", "APIキーが設定されていません。")
             else:

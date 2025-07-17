@@ -26,7 +26,7 @@ persona_instructions = ""
 client = None
 try:
     # 重要: 下の行にあなたのGrok APIキーを直接入力してください。
-    api_key = "xai-sBzV9tPcAeK1ezz7luR9bFoEsB3HZPJqTfE5A3bkrbza4uCrcO8ijhjqmowleToSBLWkPnSnlKazT0rm" 
+    api_key = "" 
 
     if not api_key or api_key == "ここにあなたのAPIキーを入力してください":
         client = None
